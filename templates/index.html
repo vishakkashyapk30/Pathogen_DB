@@ -98,14 +98,12 @@
       <!-- Insert Modal -->
       <div id="insert-modal" class="modal">
         <div class="modal-content">
-          <span class="close" onclick="closeModal('insert-modal')"
-            >&times;</span
-          >
+          <span class="close" onclick="closeModal('insert-modal')">&times;</span>
           <h2>Insert Data</h2>
           <div class="form-group">
             <label for="insert-table">Select Table:</label>
             <select id="insert-table" onchange="loadTableForm('insert')">
-              <option value="">Select a table...</option>
+              <option value="">Choose a table...</option>
             </select>
           </div>
           <div id="insert-form-container" class="form-container"></div>
@@ -115,53 +113,49 @@
       <!-- Update Modal -->
       <div id="update-modal" class="modal">
         <div class="modal-content">
-          <span class="close" onclick="closeModal('update-modal')"
-            >&times;</span
-          >
+          <span class="close" onclick="closeModal('update-modal')">&times;</span>
           <h2>Update Data</h2>
           <div class="form-group">
             <label for="update-table">Select Table:</label>
-            <select id="update-table" onchange="loadTableForm('update')">
-              <option value="">Select a table...</option>
+            <select id="update-table" onchange="loadPrimaryKeys(this.value, 'update-form-container', delrecord=false)">
+              <option value="">Choose a table...</option>
+              <!-- Populate dynamically -->
             </select>
           </div>
-          <div id="update-form-container" class="form-container"></div>
+          <div id="update-form-container"></div>
+          <div id="update-message"></div>
         </div>
       </div>
+
 
       <!-- Delete Modal -->
       <div id="delete-modal" class="modal">
         <div class="modal-content">
-          <span class="close" onclick="closeModal('delete-modal')"
-            >&times;</span
-          >
+          <span class="close" onclick="closeModal('delete-modal')">&times;</span>
           <h2>Delete Data</h2>
           <div class="form-group">
             <label for="delete-table">Select Table:</label>
-            <select id="delete-table" onchange="loadTableForm('delete')">
-              <option value="">Select a table...</option>
+            <select id="delete-table" onchange="loadPrimaryKeys(this.value, 'delete-form-container', delrecord=true)">
+              <option value="">Choose a table...</option>
+              <!-- Populate dynamically -->
             </select>
           </div>
-          <div id="delete-form-container" class="form-container"></div>
+          <div id="delete-form-container"></div>
+          <div id="delete-message"></div>
         </div>
       </div>
+      
 
       <!-- Analysis Modal -->
       <div id="analysis-modal" class="modal">
         <div class="modal-content">
-          <span class="close" onclick="closeModal('analysis-modal')"
-            >&times;</span
-          >
+          <span class="close" onclick="closeModal('analysis-modal')">&times;</span>
           <h2>Analysis Options</h2>
           <div class="analysis-options">
             <div class="card" onclick="loadAnalysis('high-risk')">
               <h3>High Risk Pathogens</h3>
               <p>View pathogens with high mutation probability</p>
             </div>
-            <!-- <div class="card" onclick="loadAnalysis('research-labs')">
-                        <h3>Research Labs Analysis</h3>
-                        <p>View labs by pathogen type</p>
-                    </div> -->
             <div class="card" onclick="loadAnalysis('vaccine-distribution')">
               <h3>Vaccine Distribution</h3>
               <p>Global distribution statistics</p>
@@ -174,9 +168,18 @@
               <h3>Project Success</h3>
               <p>Research project metrics</p>
             </div>
+            <!-- New Analysis Options -->
+            <div class="card" onclick="loadAnalysis('high-severity-countries')">
+              <h3>High Severity Countries</h3>
+              <p>View countries with high severity responses</p>
+            </div>
+            <div class="card" onclick="loadAnalysis('airborne-pathogen-funding')">
+              <h3>Airborne Pathogen Funding</h3>
+              <p>View funding for airborne pathogen research</p>
+            </div>
           </div>
           <div id="analysis-results" class="table-container"></div>
-        </div>
+      </div>
       </div>
 
       <!-- Read Modal -->

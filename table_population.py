@@ -3,7 +3,7 @@ import pymysql
 db = pymysql.connect(
     host="localhost",
     user="root",
-    password="vishak30",
+    password="agn1705mY5ql",
     database="pathogen"
 )
 
@@ -541,6 +541,41 @@ mutations_data = [
 
 for mutation in mutations_data:
     insert_mutation(*mutation)
+
+
+#0f0 add the new table 'Response_effect' and populate it    # done?
+
+create_response_effect_sql = """
+CREATE TABLE IF NOT EXISTS Response_effect (
+    response_id VARCHAR(255) NOT NULL,
+    pathogen_id VARCHAR(255) NOT NULL,
+    response_severity ENUM('Low', 'Mid', 'High') NOT NULL,
+    effectiveness_rate INT NOT NULL CHECK (effectiveness_rate BETWEEN 0 AND 100),
+    PRIMARY KEY (response_id, pathogen_id),
+    FOREIGN KEY (response_id) REFERENCES Government_response(response_id),
+    FOREIGN KEY (pathogen_id) REFERENCES Pathogen(id)
+)
+"""
+
+cursor.execute(create_response_effect_sql)
+
+response_effect_data = [
+    ('resp_001', '101', 'High', 85),
+    ('resp_002', '102', 'Mid', 60),
+    ('resp_003', '103', 'Low', 40),
+    ('resp_004', '104', 'High', 90),
+    ('resp_005', '105', 'Mid', 70)
+]
+
+def insert_response_effect(response_id, pathogen_id, response_severity, effectiveness_rate):
+    pathogen_sql = """
+    INSERT IGNORE INTO Response_effect (response_id, pathogen_id, response_severity, effectiveness_rate)
+    VALUES (%s, %s, %s, %s)
+    """
+    cursor.execute(pathogen_sql, (response_id, pathogen_id, response_severity, effectiveness_rate))
+
+for response_eff in response_effect_data:
+    insert_response_effect(*response_eff)
 
 db.commit()
 

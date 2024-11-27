@@ -3,13 +3,14 @@ import pymysql
 from datetime import datetime
 import os
 
+DB_NAME = 'Pathogen'
 app = Flask(__name__, static_url_path='/static')
 
 def get_db_connection():
     return pymysql.connect(
         host="localhost",
         user="root",
-        password="vishak30",
+        password="agn1705mY5ql",
         database="pathogen"
     )
 
@@ -17,6 +18,150 @@ def get_db_connection():
 @app.route('/')
 def index():
     return render_template('index.html')
+
+def query_primary_keys(table):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        # Get primary key columns
+        cursor.execute(f"SHOW KEYS FROM {table} WHERE Key_name = 'PRIMARY'")
+        output = cursor.fetchall()
+        
+        KCOLUMN_NAME = 4     # 4-th index
+        primary_keys = [row[KCOLUMN_NAME] for row in output]
+        print(primary_keys)
+        
+        return primary_keys
+    except Exception as e:
+        print(f"error: {e}")
+        return list()
+    finally:
+        conn.close()
+
+@app.route('/api/get_primary_keys/<table>', methods=['GET'])
+def get_primary_keys(table):
+    try:
+        primary_keys = query_primary_keys(table)
+        # print(primary_keys)
+        return jsonify({'status': 'success', 'primary_keys': primary_keys})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/api/get/<table>', methods=['POST'])
+def get_data(table):
+    conn = get_db_connection()
+    cursor = conn.cursor(pymysql.cursors.DictCursor)
+    try:
+        data = request.json
+        where_clause = " AND ".join([f"{col} = %s" for col in data.keys()])
+        values = tuple(data.values())
+
+        # Fetch the record matching the composite key
+        cursor.execute(f"SELECT * FROM {table} WHERE {where_clause}", values)
+        result = cursor.fetchone()
+
+        if not result:
+            return jsonify({'status': 'error', 'message': 'No matching record found'}), 404
+
+        return jsonify({'status': 'success', 'data': result})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        conn.close()
+
+@app.route('/api/check_constraints/<table>', methods=['POST'])
+def check_constraints(table):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        data = request.json
+        
+        # primary key where clause
+        # primary_key_attr = query_primary_keys(table)
+        # primary_key_val = [data[key] for key in primary_key_attr]
+        # where_clause = " AND ".join([f"{table}.{col} = %s" for col in primary_key_attr])
+        # values = tuple(data.values())
+        # print(f"{values=}")
+
+        # Check for dependent records in foreign key tables
+        cursor.execute(f"""
+            SELECT 
+                rc.TABLE_NAME AS Dependent_Table,
+                rc.DELETE_RULE AS Delete_Rule,
+                rc.CONSTRAINT_NAME AS Constraint_Name,
+                kcu.COLUMN_NAME AS Dependent_Column,
+                kcu.REFERENCED_COLUMN_NAME AS Referenced_Column
+            FROM 
+                information_schema.REFERENTIAL_CONSTRAINTS rc
+            JOIN 
+                information_schema.KEY_COLUMN_USAGE kcu
+                ON rc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+                AND rc.CONSTRAINT_SCHEMA = kcu.CONSTRAINT_SCHEMA
+            WHERE 
+                rc.REFERENCED_TABLE_NAME = %s
+                AND rc.CONSTRAINT_SCHEMA = %s;
+        """, (table, DB_NAME))
+        constraints = cursor.fetchall()
+        print(f"{constraints=}")
+        
+        cascade_triggers = []
+        restrict_triggers = []
+        (
+            KDEPENDENT_TABLE, KDELETE_RULE, KCONSTRAINT_NAME, KDEPENDENT_COLUMN, KREFERENCED_COLUMN 
+        ) = (
+            0, 1, 2, 3, 4
+        )
+        
+        for constraint in constraints:
+            if constraint[KDELETE_RULE] in ('CASCADE', 'RESTRICT', 'NO ACTION'):
+                dependent_table = constraint[KDEPENDENT_TABLE]
+                dependent_col = constraint[KDEPENDENT_COLUMN]
+                referenced_col = constraint[KREFERENCED_COLUMN]
+                print(f"{dependent_table=}, {dependent_col=}, {referenced_col=}")
+                
+                cursor.execute(f"""
+                    SELECT 1 FROM {dependent_table}
+                    WHERE {dependent_table}.{dependent_col} = %s LIMIT 1
+                    """, (data[referenced_col],))
+                if cursor.fetchone():
+                    if constraint[KDELETE_RULE] == 'CASCADE':
+                        cascade_triggers.append({'table': dependent_table})
+                    else:
+                        # restrict is same as no action for foreign key constraints
+                        # we have no other referential constraint than foreign keys anyway
+                        restrict_triggers.append({'table': dependent_table})
+                
+
+        warning_resp = {
+            'status': 'warning',
+            'message': '',
+            'cascade_t' : False,
+            'restrict_t' : False,
+        }
+        
+        if restrict_triggers:
+            warning_resp['restrict_t'] = True
+            warning_resp['restrict_triggers'] = restrict_triggers
+            warning_resp['message'] = 'Will trigger RESTRICT constraint on given record(s).'
+        
+        if cascade_triggers:
+            warning_resp['cascade_t'] = True
+            warning_resp['cascade_triggers'] = cascade_triggers
+            if warning_resp['restrict_t']:
+                warning_resp['message'] += ' Will trigger CASCADE, as well.'
+            else:
+                warning_resp['message'] += 'Will trigger CASCADE constraint on given record(s).'
+        
+        if warning_resp['cascade_t'] or warning_resp['restrict_t']:
+            return jsonify(warning_resp)
+        
+        return jsonify({'status': 'success', 'message': 'No constraints will be triggered'})
+    except Exception as e:
+        print(e)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    finally:
+        conn.close()
 
 # Get table schema
 @app.route('/api/table-schema/<table>')
@@ -64,15 +209,20 @@ def insert_data(table):
     
     try:
         data = request.json
-        columns = ', '.join(data.keys())
-        values = ', '.join(['%s'] * len(data))
-        sql = f"INSERT INTO {table} ({columns}) VALUES ({values})"
+        # print(data)
+        columns = [key for key in data.keys() if str(data[key])]   # "if str(data[key]) is something"
+        # print(columns)
+        # print(tuple([data[key] for key in columns]))
+        colstring = ', '.join(columns)
+        values = ', '.join(['%s'] * len(columns))
+        sql = f"INSERT INTO {table} ({colstring}) VALUES ({values})"
         
-        cursor.execute(sql, tuple(data.values()))
+        cursor.execute(sql, tuple(data[key] for key in columns))
         conn.commit()
         return jsonify({'status': 'success', 'message': 'Data inserted successfully'})
     except Exception as e:
         conn.rollback()
+        print("error:", e)
         return jsonify({'status': 'error', 'message': str(e)}), 500
     finally:
         conn.close()
@@ -84,15 +234,24 @@ def update_data(table):
     
     try:
         data = request.json
-        primary_key = data.pop('id')
-        set_clause = ', '.join([f"{key} = %s" for key in data.keys()])
-        sql = f"UPDATE {table} SET {set_clause} WHERE id = %s"
+        print("no error here")
+        primary_key_attr = query_primary_keys(table)
+        primary_key_val = [data.pop(key) for key in primary_key_attr]
+        print("we reached here")
         
-        cursor.execute(sql, tuple(data.values()) + (primary_key,))
+        set_clause = ', '.join([f"{key} = %s" for key in data.keys()])
+        where_clause = ' AND '.join([f"{key} = %s" for key in primary_key_attr])
+        sql = f"UPDATE {table} SET {set_clause} WHERE {where_clause}"
+        print(sql)
+        print(tuple(data.values()) + tuple(primary_key_val))
+        print(sql % (tuple(data.values()) + tuple(primary_key_val)))
+        
+        cursor.execute(sql, tuple(data.values()) + tuple(primary_key_val))
         conn.commit()
         return jsonify({'status': 'success', 'message': 'Data updated successfully'})
     except Exception as e:
         conn.rollback()
+        print(f"update_data error: {e}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     finally:
         conn.close()
@@ -104,14 +263,21 @@ def delete_data(table):
     
     try:
         data = request.json
-        primary_key = data['id']
-        sql = f"DELETE FROM {table} WHERE id = %s"
+        # print("no error here")
+        primary_key_attr = query_primary_keys(table)
+        primary_key_val = [data.pop(attr) for attr in primary_key_attr]
+        # print("we reached here")
         
-        cursor.execute(sql, (primary_key,))
+        where_clause = ' AND '.join([f"{key} = %s" for key in primary_key_attr])
+        sql = f"DELETE FROM {table} WHERE {where_clause}"
+        print(sql % tuple(primary_key_val))
+        
+        cursor.execute(sql, tuple(primary_key_val))
         conn.commit()
         return jsonify({'status': 'success', 'message': 'Data deleted successfully'})
     except Exception as e:
         conn.rollback()
+        print(e)
         return jsonify({'status': 'error', 'message': str(e)}), 500
     finally:
         conn.close()
@@ -153,24 +319,24 @@ def update_attribute(table):
         conn.close()
 
 # Delete specific row
-@app.route('/api/delete/<table>', methods=['POST'])
-def delete_row(table):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        data = request.json
-        identifier_column = data.get('identifier_column')
-        identifier_value = data.get('identifier_value')
+# @app.route('/api/delete/<table>', methods=['POST'])
+# def delete_row(table):
+#     conn = get_db_connection()
+#     cursor = conn.cursor()
+#     try:
+#         data = request.json
+#         identifier_column = data.get('identifier_column')
+#         identifier_value = data.get('identifier_value')
 
-        sql = f"DELETE FROM {table} WHERE {identifier_column} = %s"
-        cursor.execute(sql, (identifier_value,))
-        conn.commit()
-        return jsonify({'status': 'success', 'message': 'Record deleted successfully'})
-    except Exception as e:
-        conn.rollback()
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-    finally:
-        conn.close()
+#         sql = f"DELETE FROM {table} WHERE {identifier_column} = %s"
+#         cursor.execute(sql, (identifier_value,))
+#         conn.commit()
+#         return jsonify({'status': 'success', 'message': 'Record deleted successfully'})
+#     except Exception as e:
+#         conn.rollback()
+#         return jsonify({'status': 'error', 'message': str(e)}), 500
+#     finally:
+#         conn.close()
 
 # Analysis Routes
 @app.route('/api/analysis/high-risk')
@@ -304,6 +470,46 @@ def get_project_success_metrics():
     result = cursor.fetchall()
     conn.close()
     return jsonify(result)
+
+@app.route('/api/analysis/high-severity-countries')
+def analysis_high_severity_countries():
+    conn = get_db_connection()
+    cursor = conn.cursor(pymysql.cursors.DictCursor)
+    
+    try:
+        cursor.execute("""
+            SELECT COUNT(DISTINCT gr.country_id) AS high_severity_country_count
+            FROM Government_response gr
+            JOIN Response_effect re ON gr.response_id = re.response_id
+            JOIN Pathogen p ON re.pathogen_id = p.id
+            WHERE re.response_severity = 'High' AND p.lethality_rate > 0
+        """)
+        
+        result = cursor.fetchone()
+        conn.close()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
+@app.route('/api/analysis/airborne-pathogen-funding')
+def analysis_airborne_pathogen_funding():
+    conn = get_db_connection()
+    cursor = conn.cursor(pymysql.cursors.DictCursor)
+    
+    try:
+        cursor.execute("""
+            SELECT SUM(pul.funding_allocated) AS total_airborne_funding
+            FROM Project_under_lab pul
+            JOIN Research_project rp ON pul.project_id = rp.project_id
+            JOIN Pathogen p ON rp.pathogen_id = p.id
+            WHERE p.transmission_method = 'Airborne'
+        """)
+        
+        result = cursor.fetchone()
+        conn.close()
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error':str(e)}),500
 
 @app.route('/api/tables', methods=['GET'])
 def get_tables():
